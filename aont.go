@@ -3,8 +3,8 @@ package aont
 
 import (
 	"bytes"
+	"crypto/rand"
 	"fmt"
-	"strings"
 	"unsafe"
 )
 
@@ -18,7 +18,10 @@ func Encrypt(plain []byte, cm CipherModuler) ([][]byte, error) {
 	blockSize := cm.GetBlockSize()
 	keySize := cm.GetKeySize()
 
-	key := []byte(strings.Repeat("1", keySize))
+	// Generate random key
+	key := make([]byte, keySize)
+	rand.Read(key)
+	// key := []byte(strings.Repeat("1", keySize))
 	k0 := bytes.Repeat([]byte{k0Digit}, keySize)
 
 	mCipher, err := cm.NewCipher(key)
@@ -180,12 +183,10 @@ func intToBytes(i int, size int) []byte {
 // For each byte in 'src', compute exclusive-or with the byte in the same position of
 // 'target', and save result in 'src'.
 func xor(src, target []byte) {
-	min := len(src)
-	if len(target) < min {
-		min = len(target)
-	}
-	for i := 0; i < min; i++ {
-		src[i] ^= target[i]
+	for i, j := len(src)-1, len(target)-1; i >= 0 && j >= 0; {
+		src[i] ^= target[j]
+		i--
+		j--
 	}
 }
 
@@ -199,22 +200,8 @@ func xorWithInt(a []byte, i int) []byte {
 	}
 
 	for k := 0; k <= j; k++ {
-		c[k] = a[k] ^ 0
+		c[k] = a[k]
 	}
 
 	return c
-}
-
-func xorHashes(hashes [][]byte) []byte {
-	if len(hashes) < 1 {
-		return nil
-	}
-
-	res := make([]byte, len(hashes[0]))
-	for _, block := range hashes {
-		for i, b := range block {
-			res[i] ^= b
-		}
-	}
-	return res
 }

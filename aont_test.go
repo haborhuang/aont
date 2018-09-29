@@ -66,17 +66,6 @@ func Test_xorWithInt(t *testing.T) {
 	}
 }
 
-func Test_xorHashes(t *testing.T) {
-	a := []byte{0x01, 0x02}
-	b := []byte{0x10, 0x20}
-	got := xorHashes([][]byte{a, b})
-	xor(a, b)
-
-	if err := compareBytes(got, a); nil != err {
-		t.Fatal(err)
-	}
-}
-
 func compareBytes(got, expected []byte) error {
 	if bytes.Compare(got, expected) != 0 {
 		return fmt.Errorf("Test xor of two slice fail, got: %v, expected: %v", got, expected)
