@@ -71,13 +71,36 @@ func BenchmarkDecrypt(b *testing.B) {
 }
 
 func Test_xor(t *testing.T) {
-	a := []byte{0x01, 0x02}
-	b := []byte{0x10, 0x20}
-	expected := []byte{0x11, 0x22}
-	xor(a, b)
+	type tcase struct {
+		dstSize int
+		srcSize int
+	}
+	cases := []tcase{}
+	for i := wordSize - 1; i <= wordSize+1; i++ {
+		cases = append(cases, tcase{
+			srcSize: i,
+			dstSize: i - 1,
+		}, tcase{
+			srcSize: i,
+			dstSize: i,
+		}, tcase{
+			srcSize: i,
+			dstSize: i + 1,
+		})
+	}
+	for i, tc := range cases {
+		dst := bytes.Repeat([]byte{0x01}, tc.dstSize)
+		src := bytes.Repeat([]byte{0x10}, tc.srcSize)
+		expected := bytes.Repeat([]byte{0x11}, tc.dstSize)
+		for i := 0; i < tc.dstSize-tc.srcSize; i++ {
+			expected[i] = 0x01
+		}
+		// t.Logf("expected %v for case %d", expected, i)
 
-	if err := compareBytes(a, expected); nil != err {
-		t.Fatal(err)
+		xor(dst, src)
+		if err := compareBytes(dst, expected); nil != err {
+			t.Fatalf("case %d fail: %v", i, err)
+		}
 	}
 }
 
@@ -97,6 +120,15 @@ func Benchmark_genRandKey(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		genRandKey(key)
+	}
+}
+
+func Benchmark_xor(b *testing.B) {
+	dst := []byte{0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01}
+	src := []byte{0x10, 0x10, 0x10, 0x10, 0x10, 0x10, 0x10, 0x10, 0x10}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		xor(dst, src)
 	}
 }
 

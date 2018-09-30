@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"fmt"
 	"math/rand"
+	"runtime"
 	"time"
 	"unsafe"
 )
@@ -19,11 +20,11 @@ func Encrypt(plain []byte, cm CipherModuler) ([][]byte, error) {
 	blockSize := cm.GetBlockSize()
 	keySize := cm.GetKeySize()
 
+	k0 := bytes.Repeat([]byte{k0Digit}, keySize)
 	// Generate random key
 	key := make([]byte, keySize)
 	genRandKey(key)
 	// key = []byte(strings.Repeat("1", keySize)) // Enable this to transform with fixed key to debug
-	k0 := bytes.Repeat([]byte{k0Digit}, keySize)
 
 	mCipher, err := cm.NewCipher(key)
 	if nil != err {
@@ -34,10 +35,11 @@ func Encrypt(plain []byte, cm CipherModuler) ([][]byte, error) {
 		return nil, fmt.Errorf("New cipher handle for h[i] error: %v", err)
 	}
 
-	plainBytes, pNum := padding(plain, blockSize)
+	pNum := blockSize - len(plain)%blockSize // Padding count
+	plainLen := len(plain) + pNum
 
 	// s is number of plain blocks
-	s := len(plainBytes) / blockSize
+	s := plainLen / blockSize
 	hi := make([]byte, blockSize)
 	blocks := make([][]byte, 0, s+2)
 
@@ -47,7 +49,7 @@ func Encrypt(plain []byte, cm CipherModuler) ([][]byte, error) {
 		lastBlockSize = keySize + blockSize - keySize%blockSize
 	}
 	// Pre-alloc m' rather than to alloc each m'[i] to reduce stress of GC
-	mPrime := make([]byte, len(plainBytes)+blockSize+lastBlockSize)
+	mPrime := make([]byte, plainLen+blockSize+lastBlockSize)
 	lastBlock := mPrime[len(mPrime)-lastBlockSize:]
 	xor(lastBlock, key)
 
@@ -55,8 +57,18 @@ func Encrypt(plain []byte, cm CipherModuler) ([][]byte, error) {
 	start := (i - 1) * blockSize
 	// tmp is temporary buffer to save result of xorWithInt and intToBytes functions
 	tmp := make([]byte, blockSize)
+	var mi []byte
 	for ; i <= s; i++ {
-		mi := plainBytes[start : start+blockSize]
+		if start+blockSize > len(plain) {
+			// i.e. start+blockSize == len(plain) + pNum and padding is needed.
+			mi = make([]byte, 0, blockSize)   // Alloc a slice to avoid changing 'plain'
+			mi = append(mi, plain[start:]...) // Copy data from 'plain'
+			for j := 0; j < pNum; j++ {
+				mi = append(mi, ' ') // Pad with blank
+			}
+		} else {
+			mi = plain[start : start+blockSize]
+		}
 		mPrimeI := mPrime[start : start+blockSize] // mPrimeI is m'[i]
 		// m'[i] = Encrypt(key, i) xor m[i]
 		intToBytes(tmp, i)
@@ -156,9 +168,10 @@ func Decrypt(blocks [][]byte, cm CipherModuler) ([]byte, error) {
 	return res[:dataLen-pNum], nil
 }
 
+const intSize = int(unsafe.Sizeof(int(0)))
+
 func bytesToInt(data []byte) int {
 	var res, i int
-	intSize := int(unsafe.Sizeof(i))
 	if len(data) > intSize {
 		i = len(data) - intSize
 	}
@@ -168,22 +181,6 @@ func bytesToInt(data []byte) int {
 		res += int(0xff & data[i])
 	}
 	return res
-}
-
-// Padding blank char so that plain data length is integral multiple of blockSize
-func padding(plain []byte, blockSize int) ([]byte, int) {
-	pNum := blockSize - len(plain)%blockSize
-	b := make([]byte, len(plain)+blockSize-len(plain)%blockSize)
-
-	for i := range b {
-		if i < len(plain) {
-			b[i] = plain[i]
-		} else {
-			b[i] = ' '
-		}
-	}
-
-	return b, pNum
 }
 
 func intToBytes(dst []byte, i int) {
@@ -201,8 +198,12 @@ func intToBytes(dst []byte, i int) {
 // For each byte in 'dst', compute exclusive-or with the byte in the same position
 // in the reverse order of 'src', and save result as 'dst'.
 func xor(dst, src []byte) {
-	for i := 1; i <= len(dst) && i <= len(src); i++ {
-		dst[len(dst)-i] ^= src[len(src)-i]
+	if supportsUnaligned {
+		fastXOR(dst, src)
+	} else {
+		for i := 1; i <= len(dst) && i <= len(src); i++ {
+			dst[len(dst)-i] ^= src[len(src)-i]
+		}
 	}
 }
 
@@ -230,5 +231,35 @@ func genRandKey(key []byte) {
 		}
 		key[i] = byte(0xff & rn)
 		rn >>= 8
+	}
+}
+
+const wordSize = int(unsafe.Sizeof(uintptr(0)))
+const supportsUnaligned = runtime.GOARCH == "386" || runtime.GOARCH == "amd64" || runtime.GOARCH == "ppc64" || runtime.GOARCH == "ppc64le" || runtime.GOARCH == "s390x"
+
+// This function refers to src/crypto/cipher/xor.go of Golang
+func fastXOR(dst, src []byte) {
+	n := len(dst)
+	if len(src) < n {
+		n = len(src)
+	}
+	if n == 0 {
+		return
+	}
+
+	dst = dst[len(dst)-n:]
+	src = src[len(src)-n:]
+
+	w := n / wordSize
+	if w > 0 {
+		dw := *(*[]uintptr)(unsafe.Pointer(&dst))
+		sw := *(*[]uintptr)(unsafe.Pointer(&src))
+
+		for i := 0; i < w; i++ {
+			dw[i] ^= sw[i]
+		}
+	}
+	for i := (n - n%wordSize); i < n; i++ {
+		dst[i] ^= src[i]
 	}
 }
