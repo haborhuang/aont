@@ -21,7 +21,7 @@ func Encrypt(plain []byte, cm CipherModuler) ([][]byte, error) {
 	// Generate random key
 	key := make([]byte, keySize)
 	rand.Read(key)
-	// key := []byte(strings.Repeat("1", keySize))
+	// key = []byte(strings.Repeat("1", keySize)) // Enable this to transform with fixed key to debug
 	k0 := bytes.Repeat([]byte{k0Digit}, keySize)
 
 	mCipher, err := cm.NewCipher(key)
@@ -45,12 +45,15 @@ func Encrypt(plain []byte, cm CipherModuler) ([][]byte, error) {
 	if keySize > blockSize {
 		lastBlockSize = keySize + blockSize - keySize%blockSize
 	}
+	// Pre-alloc m' rather than to alloc each m'[i] to reduce stress of GC
 	mPrime := make([]byte, len(plainBytes)+blockSize+lastBlockSize)
 	lastBlock := mPrime[len(mPrime)-lastBlockSize:]
 	xor(lastBlock, key)
 
 	i := 1
 	start := (i - 1) * blockSize
+	// xorTmp is temporary buffer to save result of xorWithInt function
+	xorTmp := make([]byte, blockSize)
 	for ; i <= s; i++ {
 		mi := plainBytes[start : start+blockSize]
 		mPrimeI := mPrime[start : start+blockSize] // mPrimeI is m'[i]
@@ -60,7 +63,8 @@ func Encrypt(plain []byte, cm CipherModuler) ([][]byte, error) {
 		blocks = append(blocks, mPrimeI)
 
 		// h[i] = Encrypt(k0, m'[i] xor i) for i = 1, 2, ..., s, s+1
-		hCipher.Encrypt(hi, xorWithInt(mPrimeI, i))
+		xorWithInt(xorTmp, mPrimeI, i)
+		hCipher.Encrypt(hi, xorTmp)
 		xor(lastBlock, hi)
 		start = i * blockSize
 	}
@@ -69,11 +73,12 @@ func Encrypt(plain []byte, cm CipherModuler) ([][]byte, error) {
 	// m'[s+1] = Encrypt(key, s+1) xor (padding count)
 	mPrimeSPrime := mPrime[start : start+blockSize]
 	mCipher.Encrypt(mPrimeSPrime, intToBytes(i, blockSize))
-	mPrimeSPrime = xorWithInt(mPrimeSPrime, pNum)
+	xorWithInt(mPrimeSPrime, mPrimeSPrime, pNum)
 	blocks = append(blocks, mPrimeSPrime)
 
 	// h[i] = Encrypt(k0, m'[i] xor i) for i = 1, 2, ..., s, s+1
-	hCipher.Encrypt(hi, xorWithInt(mPrimeSPrime, i))
+	xorWithInt(xorTmp, mPrimeSPrime, i)
+	hCipher.Encrypt(hi, xorTmp)
 	xor(lastBlock, hi)
 
 	blocks = append(blocks, lastBlock)
@@ -101,12 +106,15 @@ func Decrypt(blocks [][]byte, cm CipherModuler) ([]byte, error) {
 	// so key = last block xor h[1] xor h[2] ... xor h[s+1]
 	key := make([]byte, keySize)
 	hi := make([]byte, blockSize)
+	// xorTmp is temporary buffer to save result of xorWithInt function
+	xorTmp := make([]byte, blockSize)
 	for i, mPrimeI := range blocks {
 		if i == len(blocks)-1 {
 			xor(key, mPrimeI)
 		} else {
 			// h[i] = Encrypt(k0, m'[i] xor i) for i = 1, 2, ..., s, s+1
-			hCipher.Encrypt(hi, xorWithInt(mPrimeI, i+1))
+			xorWithInt(xorTmp, mPrimeI, i+1)
+			hCipher.Encrypt(hi, xorTmp)
 			xor(key, hi)
 		}
 	}
@@ -184,28 +192,23 @@ func intToBytes(i int, size int) []byte {
 	return b
 }
 
-// For each byte in 'src', compute exclusive-or with the byte in the same position of
-// 'target', and save result in 'src'.
-func xor(src, target []byte) {
-	for i, j := len(src)-1, len(target)-1; i >= 0 && j >= 0; {
-		src[i] ^= target[j]
-		i--
-		j--
+// For each byte in 'dst', compute exclusive-or with the byte in the same position
+// in the reverse order of 'src', and save result as 'dst'.
+func xor(dst, src []byte) {
+	for i := 1; i <= len(dst) && i <= len(src); i++ {
+		dst[len(dst)-i] ^= src[len(src)-i]
 	}
 }
 
-func xorWithInt(a []byte, i int) []byte {
-	c := make([]byte, len(a))
-
-	j := len(a) - 1
+// Calculate exclusive-or of src and i, save the result as dst
+func xorWithInt(dst []byte, src []byte, i int) {
+	j := len(src) - 1
 	for ; j >= 0 && i > 0; i >>= 8 {
-		c[j] = byte(i) ^ a[j]
+		dst[j] = byte(i) ^ src[j]
 		j--
 	}
 
 	for k := 0; k <= j; k++ {
-		c[k] = a[k]
+		dst[k] = src[k]
 	}
-
-	return c
 }

@@ -34,14 +34,21 @@ func TestEncrypt(t *testing.T) {
 }
 
 func TestMatch(t *testing.T) {
-	cm := NewAESModuler()
-	blocks, _ := Encrypt([]byte(testData), cm)
-
-	got, _ := Decrypt(blocks, cm)
-	if testData != string(got) {
-		t.Fatal("Fail to match, decrypted:", got)
+	cms := []CipherModuler{
+		NewAESModuler(),
+		NewAES192Moduler(),
+		NewAES256Moduler(),
 	}
-	t.Log("Matched")
+	for i, cm := range cms {
+		t.Log("Matching moduler", i)
+		blocks, _ := Encrypt([]byte(testData), cm)
+
+		got, _ := Decrypt(blocks, cm)
+		if testData != string(got) {
+			t.Fatal("Fail to match, decrypted:", got)
+		}
+		t.Log("Matched")
+	}
 }
 
 func Test_xor(t *testing.T) {
@@ -59,9 +66,9 @@ func Test_xorWithInt(t *testing.T) {
 	a := []byte{0x01, 0x02}
 	b := 0x1020
 	expected := []byte{0x11, 0x22}
-	got := xorWithInt(a, b)
+	xorWithInt(a, a, b)
 
-	if err := compareBytes(got, expected); nil != err {
+	if err := compareBytes(a, expected); nil != err {
 		t.Fatal(err)
 	}
 }
