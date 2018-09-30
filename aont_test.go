@@ -51,6 +51,25 @@ func TestMatch(t *testing.T) {
 	}
 }
 
+func BenchmarkEncrypt(b *testing.B) {
+	data := []byte(testData)
+	cm := NewAESModuler()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		Encrypt(data, cm)
+	}
+}
+
+func BenchmarkDecrypt(b *testing.B) {
+	data := []byte(testData)
+	cm := NewAESModuler()
+	blocks, _ := Encrypt(data, cm)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		Decrypt(blocks, cm)
+	}
+}
+
 func Test_xor(t *testing.T) {
 	a := []byte{0x01, 0x02}
 	b := []byte{0x10, 0x20}
@@ -70,6 +89,14 @@ func Test_xorWithInt(t *testing.T) {
 
 	if err := compareBytes(a, expected); nil != err {
 		t.Fatal(err)
+	}
+}
+
+func Benchmark_genRandKey(b *testing.B) {
+	key := make([]byte, 16)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		genRandKey(key)
 	}
 }
 

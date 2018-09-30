@@ -3,8 +3,9 @@ package aont
 
 import (
 	"bytes"
-	"crypto/rand"
 	"fmt"
+	"math/rand"
+	"time"
 	"unsafe"
 )
 
@@ -20,7 +21,7 @@ func Encrypt(plain []byte, cm CipherModuler) ([][]byte, error) {
 
 	// Generate random key
 	key := make([]byte, keySize)
-	rand.Read(key)
+	genRandKey(key)
 	// key = []byte(strings.Repeat("1", keySize)) // Enable this to transform with fixed key to debug
 	k0 := bytes.Repeat([]byte{k0Digit}, keySize)
 
@@ -210,5 +211,19 @@ func xorWithInt(dst []byte, src []byte, i int) {
 
 	for k := 0; k <= j; k++ {
 		dst[k] = src[k]
+	}
+}
+
+var randSrc = rand.NewSource(time.Now().UnixNano())
+
+func genRandKey(key []byte) {
+	// Generate 63 random bits
+	var rn int64
+	for i := range key {
+		if i%8 == 0 {
+			rn = randSrc.Int63()
+		}
+		key[i] = byte(0xff & rn)
+		rn >>= 8
 	}
 }
