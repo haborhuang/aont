@@ -18,34 +18,34 @@ type aesCM struct {
 }
 
 // NewAESModuler returns a CipherModuler for AES-128
-func NewAESModuler() *aesCM {
+func NewAESModuler() aesCM {
 	return newAESCM(16)
 }
 
 // NewAES192Moduler returns a CipherModuler for AES-192
-func NewAES192Moduler() *aesCM {
+func NewAES192Moduler() aesCM {
 	return newAESCM(24)
 }
 
 // NewAES256Moduler returns a CipherModuler for AES-256
-func NewAES256Moduler() *aesCM {
+func NewAES256Moduler() aesCM {
 	return newAESCM(32)
 }
 
-func newAESCM(s int) *aesCM {
-	return &aesCM{
+func newAESCM(s int) aesCM {
+	return aesCM{
 		keySize: s,
 	}
 }
 
-func (cm *aesCM) GetBlockSize() int {
+func (cm aesCM) GetBlockSize() int {
 	return aes.BlockSize
 }
 
-func (cm *aesCM) GetKeySize() int {
+func (cm aesCM) GetKeySize() int {
 	return cm.keySize
 }
 
-func (cm *aesCM) NewCipher(key []byte) (cipher.Block, error) {
+func (cm aesCM) NewCipher(key []byte) (cipher.Block, error) {
 	return aes.NewCipher(key)
 }
