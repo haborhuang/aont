@@ -35,26 +35,25 @@ func Encrypt(plain []byte, cm CipherModuler) ([][]byte, error) {
 
 	plainBytes, pNum := padding(plain, blockSize)
 
-	var blocks [][]byte
-
 	// s is number of plain blocks
 	s := len(plainBytes) / blockSize
 	hi := make([]byte, blockSize)
+	blocks := make([][]byte, 0, s+2)
 
 	// Last block is key xor h[1] xor h[2] ... xor h[s+1]
 	lastBlockSize := blockSize
 	if keySize > blockSize {
 		lastBlockSize = keySize + blockSize - keySize%blockSize
 	}
-	lastBlock := make([]byte, lastBlockSize)
+	mPrime := make([]byte, len(plainBytes)+blockSize+lastBlockSize)
+	lastBlock := mPrime[len(mPrime)-lastBlockSize:]
 	xor(lastBlock, key)
 
 	i := 1
+	start := (i - 1) * blockSize
 	for ; i <= s; i++ {
-		start := (i - 1) * blockSize
 		mi := plainBytes[start : start+blockSize]
-
-		mPrimeI := make([]byte, blockSize) // mPrimeI is m'[i]
+		mPrimeI := mPrime[start : start+blockSize] // mPrimeI is m'[i]
 		// m'[i] = Encrypt(key, i) xor m[i]
 		mCipher.Encrypt(mPrimeI, intToBytes(i, blockSize))
 		xor(mPrimeI, mi)
@@ -63,11 +62,12 @@ func Encrypt(plain []byte, cm CipherModuler) ([][]byte, error) {
 		// h[i] = Encrypt(k0, m'[i] xor i) for i = 1, 2, ..., s, s+1
 		hCipher.Encrypt(hi, xorWithInt(mPrimeI, i))
 		xor(lastBlock, hi)
+		start = i * blockSize
 	}
 
 	// mPrimeSPrime is m'[s'] where s' = s + 1
 	// m'[s+1] = Encrypt(key, s+1) xor (padding count)
-	mPrimeSPrime := make([]byte, blockSize)
+	mPrimeSPrime := mPrime[start : start+blockSize]
 	mCipher.Encrypt(mPrimeSPrime, intToBytes(i, blockSize))
 	mPrimeSPrime = xorWithInt(mPrimeSPrime, pNum)
 	blocks = append(blocks, mPrimeSPrime)
