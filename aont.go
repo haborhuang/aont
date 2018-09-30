@@ -42,7 +42,11 @@ func Encrypt(plain []byte, cm CipherModuler) ([][]byte, error) {
 	hi := make([]byte, blockSize)
 
 	// Last block is key xor h[1] xor h[2] ... xor h[s+1]
-	lastBlock := make([]byte, blockSize)
+	lastBlockSize := blockSize
+	if keySize > blockSize {
+		lastBlockSize = keySize + blockSize - keySize%blockSize
+	}
+	lastBlock := make([]byte, lastBlockSize)
 	xor(lastBlock, key)
 
 	i := 1
