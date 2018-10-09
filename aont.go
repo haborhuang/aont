@@ -15,8 +15,30 @@ const (
 )
 
 // Encrypt transforms the plain data according to the specified cipher module
-// and return the blocks.
+// and returns the blocks.
 func Encrypt(plain []byte, cm CipherModuler) ([][]byte, error) {
+	blockSize := cm.GetBlockSize()
+	enc, err := EncryptToBytes(plain, cm)
+	if nil != err {
+		return nil, err
+	}
+
+	s := plainBlocksCount(len(plain), blockSize)
+	blocks := make([][]byte, 0, s+2)
+	i := 0
+	start := i * blockSize
+	for i <= s {
+		blocks = append(blocks, enc[start:start+blockSize])
+		i++
+		start = i * blockSize
+	}
+	blocks = append(blocks, enc[start:])
+
+	return blocks, nil
+}
+
+// EncryptToBytes does the same thing as Encrypt but the blocks are returned in bytes.
+func EncryptToBytes(plain []byte, cm CipherModuler) ([]byte, error) {
 	blockSize := cm.GetBlockSize()
 	keySize := cm.GetKeySize()
 
@@ -39,18 +61,14 @@ func Encrypt(plain []byte, cm CipherModuler) ([][]byte, error) {
 	plainLen := len(plain) + pNum
 
 	// s is number of plain blocks
-	s := plainLen / blockSize
+	s := plainBlocksCount(len(plain), blockSize)
 	hi := make([]byte, blockSize)
-	blocks := make([][]byte, 0, s+2)
 
 	// Last block is key xor h[1] xor h[2] ... xor h[s+1]
-	lastBlockSize := blockSize
-	if keySize > blockSize {
-		lastBlockSize = keySize + blockSize - keySize%blockSize
-	}
+	lbSize := lastBlockSize(blockSize, keySize)
 	// Pre-alloc m' rather than to alloc each m'[i] to reduce stress of GC
-	mPrime := make([]byte, plainLen+blockSize+lastBlockSize)
-	lastBlock := mPrime[len(mPrime)-lastBlockSize:]
+	mPrime := make([]byte, plainLen+blockSize+lbSize)
+	lastBlock := mPrime[len(mPrime)-lbSize:]
 	xor(lastBlock, key)
 
 	i := 1
@@ -74,7 +92,6 @@ func Encrypt(plain []byte, cm CipherModuler) ([][]byte, error) {
 		intToBytes(tmp, i)
 		mCipher.Encrypt(mPrimeI, tmp)
 		xor(mPrimeI, mi)
-		blocks = append(blocks, mPrimeI)
 
 		// h[i] = Encrypt(k0, m'[i] xor i) for i = 1, 2, ..., s, s+1
 		xorWithInt(tmp, mPrimeI, i)
@@ -89,16 +106,13 @@ func Encrypt(plain []byte, cm CipherModuler) ([][]byte, error) {
 	intToBytes(tmp, i)
 	mCipher.Encrypt(mPrimeSPrime, tmp)
 	xorWithInt(mPrimeSPrime, mPrimeSPrime, pNum)
-	blocks = append(blocks, mPrimeSPrime)
 
 	// h[i] = Encrypt(k0, m'[i] xor i) for i = 1, 2, ..., s, s+1
 	xorWithInt(tmp, mPrimeSPrime, i)
 	hCipher.Encrypt(hi, tmp)
 	xor(lastBlock, hi)
 
-	blocks = append(blocks, lastBlock)
-
-	return blocks, nil
+	return mPrime, nil
 }
 
 // Decrypt returns the plain data inverted from blocks according to the
@@ -166,6 +180,41 @@ func Decrypt(blocks [][]byte, cm CipherModuler) ([]byte, error) {
 	}
 
 	return res[:dataLen-pNum], nil
+}
+
+// DecryptFromBytes does the same thing as Decrypt but blocks are specified in bytes.
+func DecryptFromBytes(data []byte, cm CipherModuler) ([]byte, error) {
+	blockSize := cm.GetBlockSize()
+	keySize := cm.GetKeySize()
+	lbSize := lastBlockSize(blockSize, keySize)
+	if len(data) < blockSize+lbSize {
+		return nil, fmt.Errorf("Invalid input")
+	}
+	blocksCount := (len(data)-lbSize)/blockSize + 1
+
+	blocks := make([][]byte, 0, blocksCount)
+	for i := 0; i < blocksCount; i++ {
+		start := i * blockSize
+		end := start + blockSize
+		if i == blocksCount-1 {
+			end = len(data)
+		}
+		blocks = append(blocks, data[start:end])
+	}
+
+	return Decrypt(blocks, cm)
+}
+
+func plainBlocksCount(plainSize, blockSize int) int {
+	return (plainSize + blockSize - 1) / blockSize
+}
+
+func lastBlockSize(blockSize, keySize int) int {
+	s := blockSize
+	if keySize > s {
+		s = keySize
+	}
+	return s
 }
 
 const intSize = int(unsafe.Sizeof(int(0)))

@@ -41,11 +41,18 @@ func TestMatch(t *testing.T) {
 	}
 	for i, cm := range cms {
 		t.Log("Matching moduler", i)
-		blocks, _ := Encrypt([]byte(testData), cm)
+		data := []byte(testData)
+		blocks, _ := Encrypt(data, cm)
+		encBytes, _ := EncryptToBytes(data, cm)
 
 		got, _ := Decrypt(blocks, cm)
 		if testData != string(got) {
 			t.Fatal("Fail to match, decrypted:", got)
+		}
+
+		got, _ = DecryptFromBytes(encBytes, cm)
+		if testData != string(got) {
+			t.Fatal("Fail to match the result decrypted from bytes, decrypted:", got)
 		}
 		t.Log("Matched")
 	}
