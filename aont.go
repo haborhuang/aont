@@ -75,6 +75,8 @@ func EncryptToBytes(plain []byte, cm CipherModuler) ([]byte, error) {
 	start := (i - 1) * blockSize
 	// tmp is temporary buffer to save result of xorWithInt and intToBytes functions
 	tmp := make([]byte, blockSize)
+	// bytesI is temporary buffer to save i in bytes
+	bytesI := make([]byte, blockSize)
 	var mi []byte
 	for ; i <= s; i++ {
 		if start+blockSize > len(plain) {
@@ -89,8 +91,10 @@ func EncryptToBytes(plain []byte, cm CipherModuler) ([]byte, error) {
 		}
 		mPrimeI := mPrime[start : start+blockSize] // mPrimeI is m'[i]
 		// m'[i] = Encrypt(key, i) xor m[i]
-		intToBytes(tmp, i)
-		mCipher.Encrypt(mPrimeI, tmp)
+		// intToBytes(tmp, i)
+		// mCipher.Encrypt(mPrimeI, tmp)
+		bytesPP(bytesI)
+		mCipher.Encrypt(mPrimeI, bytesI)
 		xor(mPrimeI, mi)
 
 		// h[i] = Encrypt(k0, m'[i] xor i) for i = 1, 2, ..., s, s+1
@@ -103,8 +107,10 @@ func EncryptToBytes(plain []byte, cm CipherModuler) ([]byte, error) {
 	// mPrimeSPrime is m'[s'] where s' = s + 1
 	// m'[s+1] = Encrypt(key, s+1) xor (padding count)
 	mPrimeSPrime := mPrime[start : start+blockSize]
-	intToBytes(tmp, i)
-	mCipher.Encrypt(mPrimeSPrime, tmp)
+	// intToBytes(tmp, i)
+	// mCipher.Encrypt(mPrimeSPrime, tmp)
+	bytesPP(bytesI)
+	mCipher.Encrypt(mPrimeSPrime, bytesI)
 	xorWithInt(mPrimeSPrime, mPrimeSPrime, pNum)
 
 	// h[i] = Encrypt(k0, m'[i] xor i) for i = 1, 2, ..., s, s+1
@@ -158,6 +164,8 @@ func Decrypt(blocks [][]byte, cm CipherModuler) ([]byte, error) {
 	// Alloc result whose capacity is a block size bigger than length,
 	// so that there is enough space to calculate padding count.
 	res := make([]byte, dataLen, dataLen+blockSize)
+	// bytesI is temporary buffer to save i in bytes
+	bytesI := make([]byte, blockSize)
 	for i, mPrimeI := range blocks {
 		if i == len(blocks)-1 {
 			break
@@ -168,8 +176,10 @@ func Decrypt(blocks [][]byte, cm CipherModuler) ([]byte, error) {
 
 		// m'[i] = Encrypt(key, i) xor m[i],
 		// so m[i] = m'[i] xor Encrypt(key, i)
-		intToBytes(tmp, i+1)
-		mCipher.Encrypt(mi, tmp)
+		// intToBytes(tmp, i+1)
+		// mCipher.Encrypt(mi, tmp)
+		bytesPP(bytesI)
+		mCipher.Encrypt(mi, bytesI)
 		xor(mi, mPrimeI)
 
 		if i == len(blocks)-2 {
@@ -241,6 +251,20 @@ func intToBytes(dst []byte, i int) {
 
 	for ; j >= 0; j-- {
 		dst[j] = 0
+	}
+}
+
+// ++ Operation for bytes
+func bytesPP(b []byte) {
+	if len(b) == 0 {
+		return
+	}
+
+	if b[len(b)-1] == 0xff {
+		b[len(b)-1] = 0
+		bytesPP(b[:len(b)-1])
+	} else {
+		b[len(b)-1]++
 	}
 }
 

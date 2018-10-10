@@ -122,6 +122,62 @@ func Test_xorWithInt(t *testing.T) {
 	}
 }
 
+func Test_bytesPP(t *testing.T) {
+	b := make([]byte, 2)
+	dst := make([]byte, 2)
+	i := 0
+	for ; i <= 0xffff; i++ {
+		intToBytes(dst, i)
+		if err := compareBytes(b, dst); nil != err {
+			t.Fatal(err)
+		}
+		bytesPP(b)
+	}
+
+	t.Log("bytes:", b)
+}
+
+func Benchmark_intToBytes(b *testing.B) {
+	dst := make([]byte, 2)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		for i := 0; i <= 0xffff; i++ {
+			intToBytes(dst, i)
+		}
+	}
+}
+
+func Benchmark_bytesPP(b *testing.B) {
+	dst := make([]byte, 2)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		for i := 0; i <= 0xffff; i++ {
+			bytesPP(dst)
+		}
+	}
+}
+
+func Benchmark_xorWithInt(b *testing.B) {
+	dst := make([]byte, 2)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		for i := 0; i <= 0xffffff; i++ {
+			xorWithInt(dst, dst, i)
+		}
+	}
+}
+
+func Benchmark_xorWithBytesI(b *testing.B) {
+	dst := make([]byte, 2)
+	bytesI := make([]byte, 2)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		for i := 0; i <= 0xffffff; i++ {
+			xor(dst, bytesI)
+		}
+	}
+}
+
 func Benchmark_genRandKey(b *testing.B) {
 	key := make([]byte, 16)
 	b.ResetTimer()
@@ -141,7 +197,7 @@ func Benchmark_xor(b *testing.B) {
 
 func compareBytes(got, expected []byte) error {
 	if bytes.Compare(got, expected) != 0 {
-		return fmt.Errorf("Test xor of two slice fail, got: %v, expected: %v", got, expected)
+		return fmt.Errorf("Compare two slice fail, got: %v, expected: %v", got, expected)
 	}
 
 	return nil
