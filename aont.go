@@ -3,6 +3,7 @@ package aont
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"math/rand"
 	"runtime"
@@ -14,12 +15,25 @@ const (
 	k0Digit = byte(0x69)
 )
 
+var (
+	errNeedSpace    = errors.New("Need more space for destination")
+	errInvalidInput = errors.New("Invalid input")
+)
+
+// EncLen returns the length of the encrypted cipher text.
+// This function can be used to make slice for EncryptToBytes.
+func EncLen(plainSize int, cm CipherModuler) int {
+	blockSize := cm.GetBlockSize()
+	keySize := cm.GetKeySize()
+	return plainSize + paddingCount(plainSize, blockSize) + blockSize + lastBlockSize(blockSize, keySize)
+}
+
 // Encrypt transforms the plain data according to the specified cipher module
 // and returns the blocks.
 func Encrypt(plain []byte, cm CipherModuler) ([][]byte, error) {
 	blockSize := cm.GetBlockSize()
-	enc, err := EncryptToBytes(plain, cm)
-	if nil != err {
+	enc := make([]byte, EncLen(len(plain), cm))
+	if err := EncryptToBytes(enc, plain, cm); nil != err {
 		return nil, err
 	}
 
@@ -33,14 +47,21 @@ func Encrypt(plain []byte, cm CipherModuler) ([][]byte, error) {
 		start = i * blockSize
 	}
 	blocks = append(blocks, enc[start:])
-
 	return blocks, nil
 }
 
 // EncryptToBytes does the same thing as Encrypt but the blocks are returned in bytes.
-func EncryptToBytes(plain []byte, cm CipherModuler) ([]byte, error) {
+func EncryptToBytes(dst, plain []byte, cm CipherModuler) error {
 	blockSize := cm.GetBlockSize()
 	keySize := cm.GetKeySize()
+
+	pNum := paddingCount(len(plain), blockSize) // Padding count
+	DecryptedLen := len(plain) + pNum
+	lbSize := lastBlockSize(blockSize, keySize)
+
+	if len(dst) < DecryptedLen+blockSize+lbSize {
+		return errNeedSpace
+	}
 
 	k0 := bytes.Repeat([]byte{k0Digit}, keySize)
 	// Generate random key
@@ -50,24 +71,20 @@ func EncryptToBytes(plain []byte, cm CipherModuler) ([]byte, error) {
 
 	mCipher, err := cm.NewCipher(key)
 	if nil != err {
-		return nil, fmt.Errorf("New cipher handle for m'[i] error: %v", err)
+		return fmt.Errorf("New cipher handle for m'[i] error: %v", err)
 	}
 	hCipher, err := cm.NewCipher(k0)
 	if nil != err {
-		return nil, fmt.Errorf("New cipher handle for h[i] error: %v", err)
+		return fmt.Errorf("New cipher handle for h[i] error: %v", err)
 	}
-
-	pNum := blockSize - len(plain)%blockSize // Padding count
-	plainLen := len(plain) + pNum
 
 	// s is number of plain blocks
 	s := plainBlocksCount(len(plain), blockSize)
 	hi := make([]byte, blockSize)
 
 	// Last block is key xor h[1] xor h[2] ... xor h[s+1]
-	lbSize := lastBlockSize(blockSize, keySize)
 	// Pre-alloc m' rather than to alloc each m'[i] to reduce stress of GC
-	mPrime := make([]byte, plainLen+blockSize+lbSize)
+	mPrime := dst
 	lastBlock := mPrime[len(mPrime)-lbSize:]
 	xor(lastBlock, key)
 
@@ -118,23 +135,67 @@ func EncryptToBytes(plain []byte, cm CipherModuler) ([]byte, error) {
 	hCipher.Encrypt(hi, tmp)
 	xor(lastBlock, hi)
 
-	return mPrime, nil
+	return nil
+}
+
+// DecLen is used to make slice for DecryptFromBytes.
+func DecLen(cipherLen int, cm CipherModuler) int {
+	return cipherLen - lastBlockSize(cm.GetBlockSize(), cm.GetKeySize())
 }
 
 // Decrypt returns the plain data inverted from blocks according to the
 // specified cipher module.
 func Decrypt(blocks [][]byte, cm CipherModuler) ([]byte, error) {
+	blockSize := cm.GetBlockSize()
+	// Alloc result whose capacity is a block size bigger than length,
+	// so that there is enough space to calculate padding count.
+	dst := make([]byte, blockSize*(len(blocks)-1))
+	size, err := decrypt(dst, blocks, cm)
+	if nil != err {
+		return nil, err
+	}
+	return dst[:size], nil
+}
+
+// DecryptFromBytes does the same thing as Decrypt but blocks are specified in bytes.
+func DecryptFromBytes(dst, data []byte, cm CipherModuler) (int, error) {
+	blockSize := cm.GetBlockSize()
+	keySize := cm.GetKeySize()
+	lbSize := lastBlockSize(blockSize, keySize)
+	if len(data) < blockSize+lbSize {
+		return 0, errInvalidInput
+	}
+	blocksCount := (len(data)-lbSize)/blockSize + 1
+
+	blocks := make([][]byte, 0, blocksCount)
+	for i := 0; i < blocksCount; i++ {
+		start := i * blockSize
+		end := start + blockSize
+		if i == blocksCount-1 {
+			end = len(data)
+		}
+		blocks = append(blocks, data[start:end])
+	}
+
+	return decrypt(dst, blocks, cm)
+}
+
+func decrypt(dst []byte, blocks [][]byte, cm CipherModuler) (int, error) {
 	if len(blocks) < 2 {
-		return nil, fmt.Errorf("Invalid input")
+		return 0, errInvalidInput
 	}
 
 	blockSize := cm.GetBlockSize()
 	keySize := cm.GetKeySize()
+	dataLen := blockSize * (len(blocks) - 2)
+	if len(dst) < dataLen+blockSize {
+		return 0, errNeedSpace
+	}
 
 	k0 := bytes.Repeat([]byte{k0Digit}, keySize)
 	hCipher, err := cm.NewCipher(k0)
 	if nil != err {
-		return nil, fmt.Errorf("New cipher handle for h[i] error: %v", err)
+		return 0, fmt.Errorf("New cipher handle for h[i] error: %v", err)
 	}
 
 	// Last block = key xor h[1] xor h[2] ... xor h[s+1],
@@ -156,14 +217,10 @@ func Decrypt(blocks [][]byte, cm CipherModuler) ([]byte, error) {
 
 	mCipher, err := cm.NewCipher(key)
 	if nil != err {
-		return nil, fmt.Errorf("New cipher handle for m'[i] error: %v", err)
+		return 0, fmt.Errorf("New cipher handle for m'[i] error: %v", err)
 	}
 
 	var pNum int
-	dataLen := blockSize * (len(blocks) - 2)
-	// Alloc result whose capacity is a block size bigger than length,
-	// so that there is enough space to calculate padding count.
-	res := make([]byte, dataLen, dataLen+blockSize)
 	// bytesI is temporary buffer to save i in bytes
 	bytesI := make([]byte, blockSize)
 	for i, mPrimeI := range blocks {
@@ -172,7 +229,7 @@ func Decrypt(blocks [][]byte, cm CipherModuler) ([]byte, error) {
 		}
 
 		start := i * blockSize
-		mi := res[start : start+blockSize]
+		mi := dst[start : start+blockSize]
 
 		// m'[i] = Encrypt(key, i) xor m[i],
 		// so m[i] = m'[i] xor Encrypt(key, i)
@@ -189,30 +246,11 @@ func Decrypt(blocks [][]byte, cm CipherModuler) ([]byte, error) {
 		}
 	}
 
-	return res[:dataLen-pNum], nil
+	return dataLen - pNum, nil
 }
 
-// DecryptFromBytes does the same thing as Decrypt but blocks are specified in bytes.
-func DecryptFromBytes(data []byte, cm CipherModuler) ([]byte, error) {
-	blockSize := cm.GetBlockSize()
-	keySize := cm.GetKeySize()
-	lbSize := lastBlockSize(blockSize, keySize)
-	if len(data) < blockSize+lbSize {
-		return nil, fmt.Errorf("Invalid input")
-	}
-	blocksCount := (len(data)-lbSize)/blockSize + 1
-
-	blocks := make([][]byte, 0, blocksCount)
-	for i := 0; i < blocksCount; i++ {
-		start := i * blockSize
-		end := start + blockSize
-		if i == blocksCount-1 {
-			end = len(data)
-		}
-		blocks = append(blocks, data[start:end])
-	}
-
-	return Decrypt(blocks, cm)
+func paddingCount(plainSize, blockSize int) int {
+	return blockSize - plainSize%blockSize
 }
 
 func plainBlocksCount(plainSize, blockSize int) int {
